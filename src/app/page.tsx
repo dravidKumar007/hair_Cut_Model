@@ -32,11 +32,13 @@ interface APIResponse {
 
 export default function HomePage() {
   const [file, setFile] = useState<File | null>(null);
-  const [hairstyle, setHairstyle] = useState<string>("clean shave");
+  const [hairstyle, setHairstyle] = useState<string>("default");
+  const [beardstyle,setBeardstyle]=useState<string>("default");
   const [loading, setLoading] = useState<boolean>(false);
   const [outputImage, setOutputImage] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [error, setError] = useState<string>("");
+  const [haircolor, setHaircolor] = useState("default"); // ← Hair color state
 
   const API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY as string;
 
@@ -88,38 +90,62 @@ export default function HomePage() {
       setOutputImage(null);
 
       const base64Image = await fileToBase64(file);
+      let haircut:string;
+ 
+if (hairstyle === "default") {
+  haircut = "Do not change the hair. Keep the hairstyle exactly as it is.";
+} else {
+  haircut = `Change only the hair to: ${hairstyle}. Keep the person's face, skin, eyes, expression, and all other features exactly the same. Do not alter anything else.`;
+}
 
-      const res = await fetch(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent",
+let beardcut: string;
+if (beardstyle === "default") {
+  beardcut = "Do not change the beard. Keep the existing beard exactly as it is.";
+} else {
+  beardcut = `Change only the beard to: ${beardstyle}. Keep the face, and skin exactly the same. Do not alter anything else.`;
+}
+
+let haircolorcut: string;
+if (haircolor === "default") {
+  haircolorcut = " ";
+} else {
+  haircolorcut = `Change only the hair color to: ${haircolor}. Keep the hairstyle, face, skin, eyes,and  expression . Do not alter anything else.`;
+}
+
+const prompt = haircut + "\n" + beardcut + "\n" + haircolorcut;
+
+const res = await fetch(
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent",
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": API_KEY,
+    },
+    body: JSON.stringify({
+      contents: [
         {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": API_KEY,
-          },
-          body: JSON.stringify({
-            contents: [
-              {
-                role: "user",
-                parts: [
-                  {
-                    inline_data: {
-                      mime_type: file.type,
-                      data: base64Image,
-                    },
-                  },
-                  {
-                    text: `Change the hairstyle to ${hairstyle}. Keep the person's face and features the same, only modify the hair.`,
-                  },
-                ],
+          role: "user",
+          parts: [
+            {
+              inline_data: {
+                mime_type: file.type,
+                data: base64Image,
               },
-            ],
-            generationConfig: {
-              responseModalities: ["TEXT", "IMAGE"],
             },
-          }),
-        }
-      );
+            {
+              text: prompt,
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        responseModalities: ["TEXT", "IMAGE"],  // ← Must include BOTH
+      },
+    }),
+  }
+);
+
 
       if (!res.ok) {
         throw new Error(`HTTP error! status: ${res.status}`);
@@ -215,28 +241,98 @@ export default function HomePage() {
                     </div>
                   )}
 
-                  {/* Hairstyle Selection */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Choose Hairstyle
-                    </label>
-                    <select
-                      value={hairstyle}
-                      onChange={(e) => setHairstyle(e.target.value)}
-                      className="w-full p-3 border border-gray-300 text-zinc-900 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    >
-                      <option value="clean shave">Clean Shave</option>
-                      <option value="short fade">Short Fade</option>
-                      <option value="long hair">Long Hair</option>
-                      <option value="crew cut">Crew Cut</option>
-                      <option value="undercut">Undercut</option>
-                      <option value="man bun">Man Bun</option>
-                      <option value="buzz cut">Buzz Cut</option>
-                      <option value="pompadour">Pompadour</option>
-                      <option value="side part">Side Part</option>
-                      <option value="quiff">Quiff</option>
-                    </select>
-                  </div>
+      {/* Hairstyle Selection */}
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-2">
+    Choose Hairstyle
+  </label>
+
+  <select
+    value={hairstyle}
+    onChange={(e) => setHairstyle(e.target.value)}
+    className="w-full p-3 border border-gray-300 text-zinc-900 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+  >
+    <option value="default">No change</option>
+
+    {/* Men Hairstyles */}
+    <optgroup label="Men">
+      <option value="Bald head, 0–2 mm length, completely shaved, clean and bold appearance;">Bald </option>
+      <option value="Short fade, top 1–2 inches (25–50 mm), sides 0–1 inch (0–25 mm), sharp and modern look;">Short Fade</option>
+      <option value="Long hair, 6–12 inches (150–300 mm), flowing and versatile, rugged look;">Long Hair</option>
+      <option value="Crew cut, top 1–2 inches (25–50 mm), sides 0–1 inch (0–25 mm), classic and clean;">Crew Cut</option>
+      <option value="Undercut, sides 0–1 inch (0–25 mm), top 2–6 inches (50–150 mm), edgy contrast;">Undercut</option>
+      <option value="Man bun, 6–12 inches (150–300 mm), hair pulled back, often with shaved sides, bohemian look;">Man Bun</option>
+      <option value="Buzz cut, uniform 1.5–12 mm, simple and low-maintenance;">Buzz Cut</option>
+      <option value="Pompadour, top 4–6 inches (100–150 mm), sides 1–2 inches (25–50 mm), voluminous retro style;">Pompadour</option>
+      <option value="Side part, top 2–4 inches (50–100 mm), neat and formal;">Side Part</option>
+      <option value="Quiff, front 3–5 inches (75–125 mm), styled upwards and back, voluminous;">Quiff</option>
+    </optgroup>
+
+    {/* Women Hairstyles */}
+    <optgroup label="Women">
+      <option value="Bob Cut, chin-length, straight or slightly wavy, classic and elegant;">Bob Cut</option>
+      <option value="Layered Cut, medium length, layered for volume and texture;">Layered Cut</option>
+      <option value="Pixie Cut, short, cropped, chic and edgy;">Pixie Cut</option>
+      <option value="Long Waves, long, soft waves, voluminous and flowing;">Long Waves</option>
+      <option value="Ponytail, hair pulled back into high or low ponytail, practical yet stylish;">Ponytail</option>
+    </optgroup>
+  </select>
+</div>
+
+                  
+              <div>
+  <label className="block text-sm font-medium text-gray-700 mb-2">
+    Choose Beard Style
+  </label>
+  <select
+    value={beardstyle}
+    onChange={(e) => setBeardstyle(e.target.value)}
+    className="w-full p-3 border border-gray-300 text-zinc-900 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+  >
+    <option value="default">No change</option>
+<option value="clean shave — Completely smooth face with no facial hair, projecting a fresh, youthful, and formal look; famously sported by actors like Daniel Craig in James Bond appearances.">Clean Shave</option>
+
+<option value="stubble — Short, evenly trimmed facial hair (approx. 2–5 mm), offering a rugged yet neat aesthetic; epitomized by Ryan Gosling’s designer stubble.">Stubble</option>
+
+<option value="goatee — A precise and distinctive beard style where facial hair is grown only on the chin, forming a small, concentrated patch that highlights the center of the face. The cheeks, jawline, and sideburns are completely shaved so the skin is fully visible, leaving no stubble or extended beard growth. The chin hair is kept short to medium in length, without braids or long strands. Unlike a circle beard or Van Dyke, the mustache remains either absent or completely disconnected from the chin beard, leaving a clear gap above the lips and around the corners of the mouth. This creates a sharp contrast between the visible skin and the deliberate chin hair, emphasizing the jaw and adding definition to the lower face. Culturally, the goatee is often associated with artistic, intellectual, and occasionally rebellious personalities, offering a blend of sophistication and edginess. Iconic example: Johnny Depp, who frequently sports a short disconnected goatee in both his public appearances and films, most famously in his portrayal of Captain Jack Sparrow in the 'Pirates of the Caribbean' series.">Goatee</option>
+
+<option value="full beard — Thick, dense coverage across jawline, cheeks, and chin, projecting maturity and masculinity; showcased by Jason Momoa with his signature rugged, unkempt full beard.">Full Beard</option>
+
+<option value="van dyke — Pointed chin beard paired with a detached mustache, with cheeks clean-shaven; a bold, artistic look often associated with Johnny Depp.">Van Dyke</option>
+
+<option value="anchor — A stylized beard shaped like an anchor: jawline beard connected to a pointed chin beard and mustache, offering a sharp, modern appearance; famously worn by Robert Downey Jr. as Tony Stark.">Anchor</option>
+
+<option value="circle beard — Rounded goatee merged with a mustache, forming a neat circle around the mouth; refined style seen on Idris Elba in well-groomed roles.">Circle Beard</option>
+
+<option value="mutton chops — Thick sideburns extending down the cheeks and connecting to a mustache, with chin completely shaved to the skin (no hair); evoking vintage boldness, occasionally seen in retro character portrayals. Example: Micah Bell (RDR2)">Mutton Chops</option>
+
+<option value="balbo — Separated chin beard and mustache without cheek or jaw hair; sharp, precise, and fashion-forward, popularized by Christian Bale in various stylized roles.">Balbo</option>
+
+<option value="extended goatee — Wider goatee extending along the jawline with chin beard connected to short side patches; David Beckham has sported this to frame his strong jaw.">Extended Goatee</option>
+
+
+  </select>
+</div>
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-2">
+    Choose Hair Color
+  </label>
+  <select
+    value={haircolor}
+    onChange={(e) => setHaircolor(e.target.value)}
+    className="w-full p-3 border border-gray-300 text-zinc-900 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+  >
+    <option value="default">No change</option>
+    <option value="black, dark and natural">Black</option>
+    <option value="brown, medium warm tone">Brown</option>
+    <option value="blonde, light and bright">Blonde</option>
+    <option value="red, vibrant coppery tone">Red</option>
+    <option value="gray, silver and matured look">Gray</option>
+    <option value="white, pure white tone">White</option>
+    <option value="auburn, reddish-brown mix">Auburn</option>
+  </select>
+</div>
+
 
                   {/* Error Message */}
                   {error && (
