@@ -1,47 +1,34 @@
 'use client'
-import { useState, useRef, useEffect } from "react";
-import { Upload, Scissors, Loader2, Download, Camera, X, FileImage } from "lucide-react";
+import { useState, useRef } from "react";
+import { Upload, Scissors, Loader2, Download, Camera, X, Image } from "lucide-react";
+import { createClient } from "@/lib/client";
+// Define interfaces for API response types
+interface InlineData {
+  mime_type?: string;
+  mimeType?: string;
+  data: string;
+}
 
-// Define specific types for the function invocation to replace 'any'
-interface InvokeOptions {
-  body: {
-    base64Image: string;
-    mimeType: string;
-    prompt: string;
+interface ContentPart {
+  inline_data?: InlineData;
+  inlineData?: InlineData;
+  text?: string;
+}
+
+interface ContentItem {
+  role: string;
+  parts: ContentPart[];
+}
+
+interface Candidate {
+  content: {
+    parts: ContentPart[];
   };
 }
 
-interface InvokeSuccessResponse {
-  data: { image: string };
-  error: null;
+interface APIResponse {
+  candidates?: Candidate[];
 }
-
-interface InvokeErrorResponse {
-  data: null;
-  error: { message: string };
-}
-
-// The response from the invoke function will be one of these two types
-type InvokeResponse = InvokeSuccessResponse | InvokeErrorResponse;
-
-
-// This mock client simulates the behavior of a Supabase client.
-// It's updated to use the specific types defined above for better type safety.
-const createClient = () => ({
-  functions: {
-    invoke: async (name: string, options: InvokeOptions): Promise<InvokeResponse> => {
-      // Simulate network delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // This mock will always return a successful response for demonstration purposes.
-      // The return type definition allows for a typed error response as well.
-      return { 
-        data: { image: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==" }, 
-        error: null 
-      };
-    }
-  }
-});
 
 export default function HomePage() {
   const [file, setFile] = useState<File | null>(null);
@@ -52,56 +39,23 @@ export default function HomePage() {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [error, setError] = useState<string>("");
   const [haircolor, setHaircolor] = useState("default");
-  const [isDragging, setIsDragging] = useState(false);
-  const [showCamera, setShowCamera] = useState(false);
-  const [stream, setStream] = useState<MediaStream | null>(null);
-  
+  const [showCamera, setShowCamera] = useState<boolean>(false);
+  const [isDragOver, setIsDragOver] = useState<boolean>(false);
+  const [cameraReady, setCameraReady] = useState<boolean>(false);
+   const supabase = createClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const supabase = createClient();
+  const streamRef = useRef<MediaStream | null>(null);
 
-  // Effect to handle camera setup and cleanup
-  useEffect(() => {
-    let currentStream: MediaStream | null = null;
+  // For demo purposes - you'd need to set your actual API key
 
-    const setupCamera = async () => {
-      if (showCamera) {
-        try {
-          const mediaStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: "user" },
-            audio: false,
-          });
-          currentStream = mediaStream;
-          setStream(mediaStream);
-          if (videoRef.current) {
-            videoRef.current.srcObject = mediaStream;
-          }
-        } catch (err) {
-          setError("Could not access camera. Please check permissions.");
-          setShowCamera(false);
-        }
-      }
-    };
-
-    setupCamera();
-
-    // Cleanup function to stop the stream
-    return () => {
-      if (currentStream) {
-        currentStream.getTracks().forEach((track) => track.stop());
-      }
-    };
-  }, [showCamera]);
-
-
-  // Converts a File object to a Base64 encoded string.
+  // Convert file to base64 string
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.readAsDataURL(file);
       reader.onload = () => {
-        // We only need the Base64 part of the data URL.
         const base64String = (reader.result as string).split(",")[1];
         resolve(base64String);
       };
@@ -109,13 +63,18 @@ export default function HomePage() {
     });
   };
 
-  // Handles the selection of a file, either from input or drag-and-drop.
-  const handleFileSelect = (selectedFile: File) => {
+  // Handle file processing (from input, drag drop, or camera)
+  const processFile = (selectedFile: File) => {
+    if (!selectedFile.type.startsWith('image/')) {
+      setError("Please select a valid image file");
+      return;
+    }
+
     setFile(selectedFile);
     setError("");
     setOutputImage(null);
     
-    // Create a preview of the selected image.
+    // Create preview
     const reader = new FileReader();
     reader.onload = () => {
       setPreviewImage(reader.result as string);
@@ -123,146 +82,221 @@ export default function HomePage() {
     reader.readAsDataURL(selectedFile);
   };
 
-  // Triggered when a file is selected via the file input.
+  // Handle file input change
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
-      handleFileSelect(selectedFile);
+      processFile(selectedFile);
     } else {
       setFile(null);
       setPreviewImage(null);
     }
   };
 
-  // Drag-and-drop event handlers
-  const handleDragOver = (e: React.DragEvent) => {
+  // Handle drag and drop
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    setIsDragging(true);
+    setIsDragOver(true);
   };
 
-  const handleDragLeave = (e: React.DragEvent) => {
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    setIsDragging(false);
+    setIsDragOver(false);
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    setIsDragging(false);
+    setIsDragOver(false);
     
     const files = e.dataTransfer.files;
     if (files.length > 0) {
-      const droppedFile = files[0];
-      if (droppedFile.type.startsWith('image/')) {
-        handleFileSelect(droppedFile);
-      } else {
-        setError("Please drop an image file");
+      processFile(files[0]);
+    }
+  };
+
+  // Camera functions - FIXED VERSION
+  const startCamera = async () => {
+    setError(""); // Clear any previous errors
+    
+    try {
+      // Check if mediaDevices is supported
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error("Camera is not supported by your browser");
+      }
+
+      setShowCamera(true); // Show modal first
+      setCameraReady(false);
+
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          width: { ideal: 1280 }, 
+          height: { ideal: 720 },
+          facingMode: 'user'
+        } 
+      });
+      
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        streamRef.current = stream;
+        
+        // Wait for video to be ready
+        videoRef.current.onloadedmetadata = () => {
+          setCameraReady(true);
+        };
+      }
+    } catch (err) {
+  console.error("Camera error:", err);
+  let errorMessage = "Could not access camera.";
+
+  if (err instanceof DOMException) {
+    if (err.name === "NotAllowedError") {
+      errorMessage = "Camera permission denied. Please allow camera access and try again.";
+    } else if (err.name === "NotFoundError") {
+      errorMessage = "No camera found on your device.";
+    } else if (err.name === "NotSupportedError") {
+      errorMessage = "Camera is not supported by your browser.";
+    } else {
+      errorMessage = `Camera error: ${err.message}`;
+    }
+  } else {
+    errorMessage = `Camera error: ${String(err)}`;
+  }
+
+  setError(errorMessage);
+  setShowCamera(false); // Hide modal on error
+}
+
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setShowCamera(false);
+    setCameraReady(false);
+  };
+
+  const capturePhoto = () => {
+    if (videoRef.current && canvasRef.current) {
+      const canvas = canvasRef.current;
+      const video = videoRef.current;
+      const ctx = canvas.getContext('2d');
+      
+      if (ctx) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0);
+        
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const file = new File([blob], `camera-capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
+            processFile(file);
+            stopCamera();
+          }
+        }, 'image/jpeg', 0.8);
       }
     }
   };
 
-  // Toggles the camera modal visibility
-  const startCamera = () => setShowCamera(true);
-  const stopCamera = () => setShowCamera(false);
+type SupabaseFunctionError = {
+  message: string;
+  status?: number;
+};
 
-  // Captures a photo from the video stream.
-  const capturePhoto = () => {
-    if (videoRef.current && canvasRef.current) {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const context = canvas.getContext('2d');
-      
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      
-      context?.drawImage(video, 0, 0, canvas.width, canvas.height);
-      
-      // Convert canvas to a Blob, then to a File object.
-      canvas.toBlob((blob) => {
-        if (blob) {
-          const capturedFile = new File([blob], 'camera-capture.jpg', { type: 'image/jpeg' });
-          handleFileSelect(capturedFile);
-          stopCamera();
-        }
-      }, 'image/jpeg', 0.92);
-    }
-  };
+// ---- submit handler ----
+const handleSubmit = async () => {
+  if (!file) {
+    setError("Please upload a photo");
+    return;
+  }
 
-  // Handles the main form submission to the AI function.
-  const handleSubmit = async () => {
-    if (!file) {
-      setError("Please upload a photo");
-      return;
-    }
+  try {
+    setLoading(true);
+    setError("");
+    setOutputImage(null);
 
-    try {
-      setLoading(true);
-      setError("");
-      setOutputImage(null);
+    const base64Image = await fileToBase64(file);
 
-      const base64Image = await fileToBase64(file);
-
-      // Construct the prompt based on user selections.
-      const haircut = hairstyle === "default"
+    // --- prompt building ---
+    const haircut =
+      hairstyle === "default"
         ? "Do not change the hair. Keep the hairstyle exactly as it is."
         : `Change only the hair to: ${hairstyle}. Keep the person's face, skin, eyes, expression, and all other features exactly the same. Do not alter anything else.`;
 
-      const beardcut = beardstyle === "default"
+    const beardcut =
+      beardstyle === "default"
         ? "Do not change the beard. Keep the existing beard exactly as it is."
         : `Change only the beard to: ${beardstyle}. Keep the face and skin exactly the same. Do not alter anything else.`;
 
-      const haircolorcut = haircolor === "default"
+    const haircolorcut =
+      haircolor === "default"
         ? ""
-        : `Change only the hair color to: ${haircolor}. Keep the hairstyle, face, skin, eyes, and expression the same. Do not alter anything else.`;
+        : `Change only the hair color to: ${haircolor}. Keep the hairstyle, face, skin, eyes, and expression. Do not alter anything else.`;
 
-      const prompt = `${haircut}\n${beardcut}\n${haircolorcut}`.trim();
+    const prompt = [haircut, beardcut, haircolorcut].join("\n");
 
-      // Invoke the backend function with the image and prompt.
-      const { data, error } = await supabase.functions.invoke("gemini-function", {
-        body: {
-          base64Image,
-          mimeType: file.type,
-          prompt,
-        },
-      });
+    // --- call Supabase Edge Function ---
+    const { data, error } = await supabase.functions.invoke<{
+      image?: string;
+      error?: string;
+    }>("gemini-function", {
+      body: {
+        base64Image,
+        mimeType: file.type,
+        prompt,
+      },
+    });
 
-      // Handle potential errors from the function invocation.
-      if (error) {
-        // Now that `error` is typed, we can safely access `error.message`.
-        throw new Error(error.message);
-      }
-
-      // Handle the successful response.
-      if (data?.image) {
-        setOutputImage(data.image);
-      } else {
-        throw new Error("No image returned by function");
-      }
-    } catch (err: unknown) {
-      // Catch and display any errors that occurred during the process.
-      // Using `err: unknown` is a TypeScript best practice for type safety.
-      console.error("Error:", err);
-      const errorMessage = err instanceof Error ? err.message : "Error generating image. Please try again.";
-      setError(errorMessage);
-    } finally {
-      setLoading(false);
+    if (error) {
+      const typedError: SupabaseFunctionError = {
+        message: error.message || "Error calling Supabase Edge Function",
+        status: error.status,
+      };
+      throw typedError;
     }
-  };
 
-  // Allows the user to download the generated image.
+    if (data?.image) {
+      setOutputImage(data.image);
+    } else {
+      throw { message: data?.error || "No image returned by Gemini API" };
+    }
+  } catch (err) {
+    console.error("Error:", err);
+    const errorMessage =
+      typeof err === "object" && err !== null && "message" in err
+        ? (err as SupabaseFunctionError).message
+        : "Unexpected error occurred while generating image.";
+    setError(errorMessage);
+  } finally {
+    setLoading(false);
+  }
+};
+
+
   const downloadImage = () => {
     if (outputImage) {
       const link = document.createElement("a");
       link.href = outputImage;
-      link.download = `hairstyle-makeover-${Date.now()}.png`;
-      document.body.appendChild(link);
+      link.download = `hairstyle-${hairstyle}-${Date.now()}.png`;
       link.click();
-      document.body.removeChild(link);
+    }
+  };
+
+  const clearImage = () => {
+    setFile(null);
+    setPreviewImage(null);
+    setOutputImage(null);
+    setError("");
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 font-sans">
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50">
       <div className="container mx-auto px-4 py-8">
+        {/* Header */}
         <div className="text-center mb-8">
           <div className="flex justify-center items-center gap-3 mb-4">
             <Scissors className="w-8 h-8 text-purple-600" />
@@ -277,7 +311,7 @@ export default function HomePage() {
 
         <div className="max-w-6xl mx-auto">
           <div className="grid lg:grid-cols-2 gap-8">
-            {/* Left Column: Upload and Options */}
+            {/* Upload and Controls */}
             <div className="space-y-6">
               <div className="bg-white rounded-2xl shadow-lg p-6">
                 <h2 className="text-2xl text-gray-800 font-semibold mb-4 flex items-center gap-2">
@@ -286,124 +320,88 @@ export default function HomePage() {
                 </h2>
                 
                 <div className="space-y-6">
+                  {/* Enhanced File Upload with Multiple Options */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-3">
                       Upload Your Photo
                     </label>
                     
-                    <div className="flex gap-2 mb-4">
+                    {/* Upload Options Buttons */}
+                    <div className="grid grid-cols-2 gap-3 mb-4">
                       <button
                         onClick={() => fileInputRef.current?.click()}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors"
+                        className="flex flex-col items-center p-4 border-2 border-gray-300 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-all"
                       >
-                        <FileImage className="w-4 h-4" />
-                        Choose File
+                        <Image className="w-6 h-6 text-gray-600 mb-2" />
+                        <span className="text-sm text-gray-700">Upload from files</span>
                       </button>
+                      
                       <button
                         onClick={startCamera}
-                        className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 transition-colors"
+                        className="flex flex-col items-center p-4 border-2 border-gray-300 rounded-lg hover:border-green-500 hover:bg-green-50 transition-all"
                       >
-                        <Camera className="w-4 h-4" />
-                        Take Photo
+                        <Camera className="w-6 h-6 text-gray-600 mb-2" />
+                        <span className="text-sm text-gray-700">Camera</span>
                       </button>
+                      
+                     
                     </div>
 
+                    {/* Hidden File Input */}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleFileChange}
+                      className="hidden"
+                    />
+
+                    {/* Drag & Drop Area */}
                     <div
                       onDragOver={handleDragOver}
                       onDragLeave={handleDragLeave}
                       onDrop={handleDrop}
-                      className={`relative border-2 border-dashed rounded-lg p-8 text-center transition-all ${
-                        isDragging 
-                          ? 'border-blue-400 bg-blue-50' 
-                          : 'border-gray-300 hover:border-gray-400'
+                      onClick={() => fileInputRef.current?.click()}
+                      className={`relative border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all ${
+                        isDragOver
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50'
                       }`}
                     >
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="image/*"
-                        onChange={handleFileChange}
-                        className="hidden"
-                      />
-                      
-                      {previewImage ? (
-                        <div className="relative">
-                          <img
-                            src={previewImage}
-                            alt="Preview"
-                            className="max-w-full max-h-48 mx-auto rounded-lg"
-                          />
-                          <button
-                            onClick={() => {
-                              setFile(null);
-                              setPreviewImage(null);
-                              if (fileInputRef.current) {
-                                fileInputRef.current.value = '';
-                              }
-                            }}
-                            className="absolute top-2 right-2 w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
-                      ) : (
-                        <div>
-                          <Upload className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                          <p className="text-gray-600 mb-2">
-                            Drag and drop your image here, or use the buttons above
-                          </p>
-                          <p className="text-sm text-gray-500">
-                            Supports JPG, PNG, WebP up to 10MB
-                          </p>
-                        </div>
-                      )}
+                      <Upload className={`w-12 h-12 mx-auto mb-3 ${isDragOver ? 'text-blue-500' : 'text-gray-400'}`} />
+                      <p className={`text-sm ${isDragOver ? 'text-blue-600' : 'text-gray-600'}`}>
+                        {isDragOver ? 'Drop your image here' : 'Click here or drag & drop your image'}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Supports JPG, PNG, WebP formats
+                      </p>
                     </div>
                   </div>
 
-                  {/* Camera Modal */}
-                  {showCamera && (
-                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center h-full justify-center z-50">
-                      <div className="bg-white rounded-lg p-6 max-w-lg w-full mx-4">
-                        <div className="flex justify-between items-center mb-4">
-                          <h3 className="text-lg font-semibold">Take a Photo</h3>
-                          <button
-                            onClick={stopCamera}
-                            className="text-gray-500 hover:text-gray-700"
-                          >
-                            <X className="w-6 h-6" />
-                          </button>
-                        </div>
-                        
-                        <div className="relative mb-4">
-                          <video
-                            ref={videoRef}
-                            autoPlay
-                            playsInline
-                            muted
-                            className="w-full rounded-lg bg-black"
-                          />
-                        </div>
-                        
-                        <div className="flex gap-2 justify-center">
-                          <button
-                            onClick={capturePhoto}
-                            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
-                          >
-                            <Camera className="w-4 h-4" />
-                            Capture
-                          </button>
-                          <button
-                            onClick={stopCamera}
-                            className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
-                          >
-                            Cancel
-                          </button>
-                        </div>
+                  {/* Preview Image with Clear Option */}
+                  {previewImage && (
+                    <div>
+                      <div className="flex justify-between items-center mb-2">
+                        <label className="block text-sm font-medium text-gray-700">
+                          Original Photo
+                        </label>
+                        <button
+                          onClick={clearImage}
+                          className="text-red-600 hover:text-red-800 text-sm flex items-center gap-1"
+                        >
+                          <X className="w-4 h-4" />
+                          Clear
+                        </button>
+                      </div>
+                      <div className="relative w-full max-w-md mx-auto">
+                        <img
+                          src={previewImage}
+                          alt="Preview"
+                          className="w-full h-auto rounded-lg shadow-md"
+                        />
                       </div>
                     </div>
                   )}
-
-                  <canvas ref={canvasRef} className="hidden" />
 
                   {/* Hairstyle Selection */}
                   <div>
@@ -416,6 +414,8 @@ export default function HomePage() {
                       className="w-full p-3 border border-gray-300 text-zinc-900 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     >
                       <option value="default">No change</option>
+
+                      {/* Men Hairstyles */}
                       <optgroup label="Men">
                         <option value="Bald head, 0–2 mm length, completely shaved, clean and bold appearance;">Bald</option>
                         <option value="Short fade, top 1–2 inches (25–50 mm), sides 0–1 inch (0–25 mm), sharp and modern look;">Short Fade</option>
@@ -428,6 +428,8 @@ export default function HomePage() {
                         <option value="Side part, top 2–4 inches (50–100 mm), neat and formal;">Side Part</option>
                         <option value="Quiff, front 3–5 inches (75–125 mm), styled upwards and back, voluminous;">Quiff</option>
                       </optgroup>
+
+                      {/* Women Hairstyles */}
                       <optgroup label="Women">
                         <option value="Bob Cut, chin-length, straight or slightly wavy, classic and elegant;">Bob Cut</option>
                         <option value="Layered Cut, medium length, layered for volume and texture;">Layered Cut</option>
@@ -437,7 +439,7 @@ export default function HomePage() {
                       </optgroup>
                     </select>
                   </div>
-
+                  
                   {/* Beard Style Selection */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -483,7 +485,7 @@ export default function HomePage() {
                     </select>
                   </div>
 
-                  {/* Error Display */}
+                  {/* Error Message */}
                   {error && (
                     <div className="bg-red-50 border border-red-200 rounded-lg p-4">
                       <p className="text-red-800">{error}</p>
@@ -512,7 +514,7 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* Right Column: Output Display */}
+            {/* Results */}
             <div className="space-y-6">
               {outputImage && (
                 <div className="bg-white rounded-2xl shadow-lg p-6">
@@ -536,24 +538,27 @@ export default function HomePage() {
                       alt="Generated hairstyle"
                       className="w-full h-auto rounded-lg shadow-lg"
                     />
+                    <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 text-white px-3 py-1 rounded text-sm">
+                      {hairstyle.charAt(0).toUpperCase() + hairstyle.slice(1)}
+                    </div>
                   </div>
                 </div>
               )}
 
               {!outputImage && !loading && (
-                <div className="bg-gray-50 rounded-2xl border-2 border-dashed border-gray-300 p-12 text-center flex flex-col justify-center items-center h-full">
+                <div className="bg-gray-50 rounded-2xl border-2 border-dashed border-gray-300 p-12 text-center">
                   <Scissors className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                   <h3 className="text-xl font-medium text-gray-700 mb-2">
                     Ready to Transform?
                   </h3>
                   <p className="text-gray-500">
-                    Upload a photo and select a hairstyle to see the magic happen!
+                    Upload a photo using camera, gallery, or drag & drop to see the magic happen!
                   </p>
                 </div>
               )}
 
               {loading && (
-                <div className="bg-white rounded-2xl shadow-lg p-12 text-center flex flex-col justify-center items-center h-full">
+                <div className="bg-white rounded-2xl shadow-lg p-12 text-center">
                   <Loader2 className="w-16 h-16 text-purple-600 mx-auto mb-4 animate-spin" />
                   <h3 className="text-xl font-medium text-gray-700 mb-2">
                     Creating Your New Look
@@ -567,31 +572,96 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* How It Works Section */}
+        {/* Camera Modal - FIXED */}
+        {showCamera && (
+          <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-xl font-semibold">Take a Photo</h3>
+                <button
+                  onClick={stopCamera}
+                  className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <div className="space-y-4">
+                {!cameraReady && (
+                  <div className="w-full h-64 bg-gray-200 rounded-lg flex items-center justify-center">
+                    <div className="text-center">
+                      <Loader2 className="w-8 h-8 text-gray-400 animate-spin mx-auto mb-2" />
+                      <p className="text-gray-600">Starting camera...</p>
+                    </div>
+                  </div>
+                )}
+                
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className={`w-full h-64 bg-gray-200 rounded-lg object-cover ${!cameraReady ? 'hidden' : ''}`}
+                />
+                
+                <div className="flex gap-3">
+                  <button
+                    onClick={capturePhoto}
+                    disabled={!cameraReady}
+                    className="flex-1 bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Camera className="w-5 h-5" />
+                    {cameraReady ? 'Capture Photo' : 'Loading...'}
+                  </button>
+                  <button
+                    onClick={stopCamera}
+                    className="px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Hidden canvas for photo capture */}
+        <canvas ref={canvasRef} className="hidden" />
+
+        {/* Instructions */}
         <div className="max-w-4xl mx-auto mt-12 bg-white rounded-2xl shadow-lg p-6">
           <h3 className="text-xl font-semibold text-zinc-800 mb-4">How It Works</h3>
-          <div className="grid md:grid-cols-3 gap-6">
+          <div className="grid md:grid-cols-4 gap-6">
             <div className="text-center">
-              <div className="w-12 h-12 text-lg font-bold bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-3">
+              <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-3">
                 1
               </div>
-              <h4 className="font-medium mb-2 text-gray-500">Upload Photo</h4>
+              <h4 className="font-medium mb-2 text-gray-500">Choose Input</h4>
               <p className="text-sm text-gray-600">
-                Choose a file, drag & drop, or take a photo with your camera
+                Use camera, gallery, or drag & drop to upload
               </p>
             </div>
             <div className="text-center">
-              <div className="w-12 h-12 text-lg font-bold bg-purple-100 text-purple-600 rounded-full flex items-center justify-center mx-auto mb-3">
+              <div className="w-12 h-12 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-3">
                 2
+              </div>
+              <h4 className="font-medium text-gray-500 mb-2">Upload Photo</h4>
+              <p className="text-sm text-gray-600">
+                Choose a clear, front-facing photo of yourself
+              </p>
+            </div>
+            <div className="text-center">
+              <div className="w-12 h-12 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center mx-auto mb-3">
+                3
               </div>
               <h4 className="font-medium text-gray-500 mb-2">Select Style</h4>
               <p className="text-sm text-gray-600">
-                Pick from our variety of hairstyle, beard, and color options
+                Pick from hairstyles, beard styles, and colors
               </p>
             </div>
             <div className="text-center">
-              <div className="w-12 h-12 text-lg font-bold bg-pink-100 text-pink-600 rounded-full flex items-center justify-center mx-auto mb-3">
-                3
+              <div className="w-12 h-12 bg-pink-100 text-pink-600 rounded-full flex items-center justify-center mx-auto mb-3">
+                4
               </div>
               <h4 className="font-medium mb-2 text-gray-500">Get Results</h4>
               <p className="text-sm text-gray-600">
